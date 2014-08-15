@@ -7,10 +7,10 @@
 
 # Variables
 # read variables from config file
-. /etc/devConfArchive.conf
+. /etc/devConfVars.conf
 # tftpRoot="*****"
 # tftpServer="****"
-# snmpRW="****"
+# snmpCommunity="****"
 
 Y=`date +%Y`
 M=`date +%m`
