@@ -8,15 +8,18 @@
 # Variables
 # read variables from config file
 . /etc/devConfVars.conf
-# tftpRoot="*****"
-# tftpServer="****"
 # snmpCommunity="****"
+# tftpRoot="****"
+# tftpServer="****"
+# dirRunning="****"
+# dirStartup="****"
+
 
 Y=`date +%Y`
 M=`date +%m`
 D=`date +%d`
 
-tftpDevRunRoot="${tftpRoot}/devConf/running/${Y}/${Y}-${M}/${Y}-${M}-${D}"
+tftpDevRunRoot="${tftpRoot}/${dirRunning}/${Y}/${Y}-${M}/${Y}-${M}-${D}"
 logFile="/var/log/devices/devConfSave.log"
 
 # SNMP CISCO
