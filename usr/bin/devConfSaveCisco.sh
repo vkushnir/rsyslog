@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # devConfSaveCisco.sh - Save runing configs
-# devConfSaveCisco.sh <ip> <name> <text>
+# devConfSaveCisco.sh -i <ip> [-n <name>] [<text>]
 #
 ###########################################################################
 
@@ -13,14 +13,12 @@
 # tftpServer="****"
 # dirRunning="****"
 # dirStartup="****"
-
+# logFile="****"
 
 Y=`date +%Y`
 M=`date +%m`
 D=`date +%d`
-
-tftpDevRunRoot="${tftpRoot}/${dirRunning}/${Y}/${Y}-${M}/${Y}-${M}-${D}"
-logFile="/var/log/devices/devConfSave.log"
+thisFN=`basename $0`
 
 # SNMP CISCO
 # ConfigCopyProtocol
@@ -32,54 +30,71 @@ waiting=1; running=2; successful=3; failed=4
 # RowStatus
 active=1; notInService=2; notReady=3; createAndGo=4; createAndWait=5; destroy=6
 # Get Parameters
-if [ $# = 3 ]; then
-  devIP=$1
-  devNAME=$2
-  devLog=$3
-else
-  devIP=`echo $1 | cut -d'|' -f1`
-  devNAME=`echo $1 | cut -d'|' -f2`
-  devLog=`echo $1 | cut -d'|' -f3`
+
+if [ $# -lt 1 ]; then
+  echo "$thisFN: No options found! [$@]"
+  exit 1
+fi
+
+devIP="noip"
+while getopts "i:n:" opt; do
+  case $opt in
+    i) devIP=$OPTARG;;
+    n) devNAME=$OPTARG;;
+    l) devLOG=$OPTARG;;
+    *) echo "$thisFN: Specify IP address" >> $logFile; exit 1;;
+  esac
+done
+shift $((OPTIND-1))
+devLog=$@
+
+if [ $devIP == "noip" ]; then
+  echo "$thisFN: Specify IP address" >> $logFile
+  echo "Specify IP address"
+  exit 1
 fi
 
 r=$RANDOM
-if [ $devIP != $devNAME ]; then
+devID="${devIP}"
+
+if [ "$devNAME" != "" -a "$devNAME" != "$devIP" ]; then
   devID="${devIP}-${devNAME}"
-else
-  devID="${devIP}"
 fi
 
+tftpDevRunRoot="${tftpRoot}/${dirRunning}/${Y}/${devIP}/${Y}-${M}/${Y}-${M}-${D}"
+
 n=1
-fn="${devID}_${n}.txt"
+fn="${devID}_${n}.cfg"
 while [ -f ${tftpDevRunRoot}/${fn} ]; do
   echo "Check File: $fn"
   n=$(($n+1));
-  fn="${devID}_${n}.txt";
+  fn="${devID}_${n}.cfg";
 done
 
-echo "CONFIG IP: $devIP, NAME: $devNAME, TEXT: $devLog, FileName: $fn" >> $logFile
-echo "Location: ${tftpDevRunRoot}" >> $logFile
+echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
+echo "$thisFN: Location: ${tftpDevRunRoot}" >> $logFile
 r=1
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyProtocol.$r i $tftp >> $logFile
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopySourceFileType.$r i $runningConfig
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyDestFileType.$r i $networkFile
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyServerAddress.$r a $tftpServer
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyFileName.$r s $fn >> $logFile
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $active
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyProtocol.$r i $tftp >> $logFile
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopySourceFileType.$r i $runningConfig
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyDestFileType.$r i $networkFile
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyServerAddress.$r a $tftpServer
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyFileName.$r s $fn >> $logFile
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $active
+sleep 1s
 
 n=1
-ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
+ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
 while [ "$ccCopyState" = "active" -o "$ccCopyState" = "running" ]; do
   sleep 1s
-  ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
+  ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
   n=$(($n+1));
-  if [ n -gt 10 ]; then
+  if [ $n -gt 10 ]; then
     echo " Too long process! Exit."
     break
   fi
 done
-snmpget -v 2c -m ALL -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r >> $logFile
-snmpset -v 2c -O qv -t 5 -c $snmpRW $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $destroy
+snmpget -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r >> $logFile
+snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $destroy
 
 # TYPE: one of i, u, t, a, o, s, x, d, b, n
 #        i: INTEGER, u: unsigned INTEGER, t: TIMETICKS, a: IPADDRESS
