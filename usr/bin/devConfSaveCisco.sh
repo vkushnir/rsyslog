@@ -14,6 +14,7 @@
 # dirRunning="****"
 # dirStartup="****"
 # logFile="****"
+# diffOpt="-***"
 
 Y=`date +%Y`
 M=`date +%m`
@@ -61,18 +62,19 @@ if [ "$devNAME" != "" -a "$devNAME" != "$devIP" ]; then
   devID="${devIP}-${devNAME}"
 fi
 
-tftpDevRunRoot="${tftpRoot}/${dirRunning}/${Y}/${devIP}/${Y}-${M}/${Y}-${M}-${D}"
+tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devIP}/${Y}-${M}/${Y}-${M}-${D}"
 
 n=1
 fn="${devID}_${n}.cfg"
-while [ -f ${tftpDevRunRoot}/${fn} ]; do
+while [ -f ${tftpDevRoot}/${fn} ]; do
   echo "Check File: $fn"
   n=$(($n+1));
+  pfn=$fn
   fn="${devID}_${n}.cfg";
 done
 
 echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
-echo "$thisFN: Location: ${tftpDevRunRoot}" >> $logFile
+echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
 r=1
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyProtocol.$r i $tftp >> $logFile
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopySourceFileType.$r i $runningConfig
@@ -82,18 +84,17 @@ snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyF
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $active
 sleep 1s
 
-n=1
+i=1
 ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
 while [ "$ccCopyState" = "active" -o "$ccCopyState" = "running" ]; do
   sleep 1s
   ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
-  n=$(($n+1));
-  if [ $n -gt 10 ]; then
+  i=$(($i+1));
+  if [ $i -gt 10 ]; then
     echo " Too long process! Exit."
     break
   fi
 done
-snmpget -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r >> $logFile
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $destroy
 
 # TYPE: one of i, u, t, a, o, s, x, d, b, n
@@ -101,8 +102,23 @@ snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyE
 #        o: OBJID, s: STRING, x: HEX STRING, d: DECIMAL STRING, b: BITS
 #        U: unsigned int64, I: signed int64, F: float, D: double
 
-#Set date folder
-mkdir -p $tftpDevRunRoot
-chown -R tftpd:tftpd $tftpDevRunRoot
-mv -f ${tftpRoot}/$fn ${tftpDevRunRoot}/${fn} >> $logFile
-echo "" >> $logFile
+if [ $ccCopyState = "successful" ]; then
+  if [ -f ${tftpDevRoot}/${pfn} ]; then
+    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^!' ${tftpRoot}/${fn} ${tftpDevRoot}/${pfn}`
+    if [[ $diffRes == *identical ]]; then
+      echo "$thisFN: New file same as previous." >> $logFile
+      echo "" >> $logFile
+      rm -f ${tftpRoot}/${fn}
+      exit 0
+    fi
+  fi
+  mkdir -p $tftpDevRoot
+  chown -R tftpd:tftpd $tftpDevRoot
+  mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn} >> $logFile
+  echo "" >> $logFile
+else
+  echo "$thisFN: Fail to save [$fn] from [$devIP] with status ($ccCopyState) !!!" >> $logFile
+  echo "" >> $logFile
+  exit 1
+fi
+

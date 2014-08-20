@@ -14,7 +14,10 @@
 # dirRunning="****"
 # dirStartup="****"
 # logFile="****"
+# diffOpt="-***"
 cfgMode="RUN"
+
+set -x
 
 Y=`date +%Y`
 M=`date +%m`
@@ -87,6 +90,7 @@ fn="${devID}_${n}.cfg"
 while [ -f ${tftpDevRoot}/${fn} ]; do
   echo "Check File: $fn"
   n=$(($n+1));
+  pfn=$fn
   fn="${devID}_${n}.cfg";
 done
 
@@ -102,13 +106,13 @@ sysMgmtTftpConfigIndex="$sysObjectID.$sysMgmt.$Tftp.$ConfigIndex.0"
 sysMgmtTftpAction="$sysObjectID.$sysMgmt.$Tftp.$Action.0"
 sysMgmtTftpActionStatus="$sysObjectID.$sysMgmt.$Tftp.$ActionStatus.0"
 
-n=1
+i=1
 ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
 while [ $ActionStatus = "under-action" -o $ActionStatus = $StatusUnderAction ]; do
   sleep 1s
   ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
-  n=$(($n+1));
-  if [ $n -gt 10 ]; then
+  i=$(($i+1));
+  if [ $i -gt 10 ]; then
     echo " Too long process! Exit."
     exit 1;
   fi
@@ -119,12 +123,13 @@ snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP $sysMgmtTftpRemoteFileName s $
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP $sysMgmtTftpAction i $ActionBackupConfig
 sleep 1s
 
+i=1
 ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
 while [ $ActionStatus = "under-action" -o $ActionStatus = $StatusUnderAction ]; do
   sleep 1s
   ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
-  n=$(($n+1));
-  if [ $n -gt 10 ]; then
+  i=$(($i+1));
+  if [ $i -gt 10 ]; then
     echo " Too long process! Exit."
     exit 1;
   fi
@@ -135,18 +140,24 @@ done
 #        o: OBJID, s: STRING, x: HEX STRING, d: DECIMAL STRING, b: BITS
 #        U: unsigned int64, I: signed int64, F: float, D: double
 
-#Set date folder
+# Store file
 if [ $ActionStatus = success -o $ActionStatus = $StatusSuccess ]; then
+  if [ -f ${tftpDevRoot}/${pfn} ]; then
+    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^;' ${tftpRoot}/${fn} ${tftpDevRoot}/${pfn}`
+    if [[ $diffRes == *identical ]]; then
+      echo "$thisFN: New file same as previous." >> $logFile
+      echo "" >> $logFile
+      rm -f ${tftpRoot}/${fn}
+      exit 0
+    fi
+  fi
   mkdir -p $tftpDevRoot
   chown -R tftpd:tftpd $tftpDevRoot
-  mv -f ${tftpRoot}/$fn ${tftpDevRoot}/${fn} >> $logFile
+  mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn} >> $logFile
   echo "" >> $logFile
 else
-  if [ $ActionStatus = fail -o $ActionStatus = $StatusFail ]; then 
-    echo "$thisFN: Fail to save [$fn] from [$devIP] !!!" >> $logFile
-    echo "" >> $logFile
-  fi
+  echo "$thisFN: Fail to save [$fn] from [$devIP] with ststus ($ActionStatus) !!!" >> $logFile
+  echo "" >> $logFile
+  exit 1
 fi
-
-
 
