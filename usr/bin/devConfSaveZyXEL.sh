@@ -138,11 +138,6 @@ while [ $ActionStatus = "under-action" -o $ActionStatus = $StatusUnderAction ]; 
   fi
 done
 
-# TYPE: one of i, u, t, a, o, s, x, d, b, n
-#        i: INTEGER, u: unsigned INTEGER, t: TIMETICKS, a: IPADDRESS
-#        o: OBJID, s: STRING, x: HEX STRING, d: DECIMAL STRING, b: BITS
-#        U: unsigned int64, I: signed int64, F: float, D: double
-
 # Store file
 if [ $ActionStatus = success -o $ActionStatus = $StatusSuccess ]; then
   if [ -f ${tftpDevRoot}/${pfn} ]; then
@@ -156,8 +151,18 @@ if [ $ActionStatus = success -o $ActionStatus = $StatusSuccess ]; then
   fi
   mkdir -p $tftpDevRoot
   chown -R tftpd:tftpd $tftpDevRoot
+  chmod -R 755 $tftpDevRoot
   mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn} >> $logFile
   echo "" >> $logFile
+  
+  flist=`ls -1 --sort=time --reverse $tftpDevRoot/*.cfg`
+  fcnt=`echo $flist | wc -w`
+  if [ $fcnt -gt 1 ]; then
+    ff=$(echo $flist | tr ' ' '\n' | head -1)
+    lf=$(echo $flist | tr ' ' '\n' | tail -1)
+    `diff $diffOpt --ignore-matching-lines='^;' $ff $lf > ${tftpDevRoot}/$devIP.diff`
+  fi
+
 else
   echo "$thisFN: Fail to save [$fn] from [$devIP] with ststus ($ActionStatus) !!!" >> $logFile
   echo "" >> $logFile

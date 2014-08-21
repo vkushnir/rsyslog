@@ -114,8 +114,18 @@ if [ $ccCopyState = "successful" ]; then
   fi
   mkdir -p $tftpDevRoot
   chown -R tftpd:tftpd $tftpDevRoot
+  chmod -R 755 $tftpDevRoot
   mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn} >> $logFile
   echo "" >> $logFile
+
+  flist=`ls -1 --sort=time --reverse $tftpDevRoot/*.cfg`
+  fcnt=`echo $flist | wc -w`
+  if [ $fcnt -gt 1 ]; then
+    ff=$(echo $flist | tr ' ' '\n' | head -1)
+    lf=$(echo $flist | tr ' ' '\n' | tail -1)
+    `diff $diffOpt --ignore-matching-lines='^;' $ff $lf > ${tftpDevRoot}/$devIP.diff`
+  fi
+
 else
   echo "$thisFN: Fail to save [$fn] from [$devIP] with status ($ccCopyState) !!!" >> $logFile
   echo "" >> $logFile
