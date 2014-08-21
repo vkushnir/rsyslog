@@ -17,8 +17,6 @@
 # diffOpt="-***"
 cfgMode="RUN"
 
-set -x
-
 Y=`date +%Y`
 M=`date +%m`
 D=`date +%d`
@@ -94,11 +92,16 @@ while [ -f ${tftpDevRoot}/${fn} ]; do
   fn="${devID}_${n}.cfg";
 done
 
-echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
-echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
-
 # TFTP
 sysObjectID=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP SNMPv2-MIB::sysObjectID.0)
+if [ $? -ne 0 ]; then
+  echo "$thisFN: IP: $devIP SNMP Error !!!" >> $logFile
+  echo "" >> $logFile
+  exit 1
+fi
+
+echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
+echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
 
 sysMgmtTftpServerIp="$sysObjectID.$sysMgmt.$Tftp.$ServerIp.0"
 sysMgmtTftpRemoteFileName="$sysObjectID.$sysMgmt.$Tftp.$RemoteFileName.0"
