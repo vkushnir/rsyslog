@@ -11,10 +11,11 @@
 # snmpCommunity="****"
 # tftpRoot="****"
 # tftpServer="****"
+# tftpWait="****"
 # dirRunning="****"
 # dirStartup="****"
 # logFile="****"
-# diffOpt="-***"
+# diffOpt="-iubEB"
 
 Y=`date +%Y`
 M=`date +%m`
@@ -56,26 +57,30 @@ if [ $devIP == "noip" ]; then
 fi
 
 r=$RANDOM
-devID="${devIP}"
+saveIFS=$IFS
+IFS='.'
+devID=$(printf "%03d.%03d.%03d.%03d" $devIP)
+IFS=$saveIFS
 
-if [ "$devNAME" != "" -a "$devNAME" != "$devIP" ]; then
-  devID="${devIP}-${devNAME}"
-fi
+#devID="${devIP}"
+#if [ "$devNAME" != "" -a "$devNAME" != "$devIP" ]; then
+#  devID="${devIP}-${devNAME}"
+#fi
 
-tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devIP}/${Y}-${M}/${Y}-${M}-${D}"
+tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devID}/${Y}-${M}"
 
+# Generate file name
 n=1
-fn="${devID}_${n}.cfg"
+fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
 while [ -f ${tftpDevRoot}/${fn} ]; do
   echo "Check File: $fn"
   n=$(($n+1));
-  pfn=$fn
-  fn="${devID}_${n}.cfg";
+  fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
 done
 
 echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
 echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
-r=1
+# r=1
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyProtocol.$r i $tftp >> $logFile
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopySourceFileType.$r i $runningConfig
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyDestFileType.$r i $networkFile
@@ -90,21 +95,31 @@ while [ "$ccCopyState" = "active" -o "$ccCopyState" = "running" ]; do
   sleep 1s
   ccCopyState=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyState.$r)
   i=$(($i+1));
-  if [ $i -gt 10 ]; then
-    echo " Too long process! Exit."
+  if [ $i -gt $tftpWait ]; then
+    echo " Too long process! Exit." >> $logFile
+    echo "" >> $logFile
     break
   fi
 done
 snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyEntryRowStatus.$r i $destroy
 
-# TYPE: one of i, u, t, a, o, s, x, d, b, n
-#        i: INTEGER, u: unsigned INTEGER, t: TIMETICKS, a: IPADDRESS
-#        o: OBJID, s: STRING, x: HEX STRING, d: DECIMAL STRING, b: BITS
-#        U: unsigned int64, I: signed int64, F: float, D: double
-
+# Store file
 if [ $ccCopyState = "successful" ]; then
-  if [ -f ${tftpDevRoot}/${pfn} ]; then
-    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^!' ${tftpRoot}/${fn} ${tftpDevRoot}/${pfn}`
+  if [ -d $tftpDevRoot ]; then
+    flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep \.cfg)
+    fcnt=$(echo $flist | wc -w)
+    if [ $fcnt -ge 1 ]; then
+      ff=$(echo $flist | tr ' ' '\n' | head -1)
+      lf=$(echo $flist | tr ' ' '\n' | tail -1)
+    else
+      ff=0
+      lf=0
+    fi
+  else
+    fcnt=0
+  fi
+  if [ -f ${tftpDevRoot}/${lf} ]; then
+    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^!' ${tftpRoot}/${fn} ${tftpDevRoot}/${lf}`
     if [[ $diffRes == *identical ]]; then
       echo "$thisFN: New file same as previous." >> $logFile
       echo "" >> $logFile
@@ -112,22 +127,21 @@ if [ $ccCopyState = "successful" ]; then
       exit 0
     fi
   fi
-  mkdir -p $tftpDevRoot
-  chown -R tftpd:tftpd $tftpDevRoot
-  chmod -R 755 $tftpDevRoot
-  mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn} >> $logFile
+  if [ ! -d $tftpDevRoot ]; then
+    mkdir -p $tftpDevRoot
+    chown -R tftpd:tftpd $tftpDevRoot
+    chmod -R 755 $tftpDevRoot
+  fi
+  mv -f ${tftpRoot}/${fn} ${tftpDevRoot}/${fn}
+  chmod 644 ${tftpDevRoot}/${fn}
   echo "" >> $logFile
 
-  flist=`ls -1 --sort=time --reverse $tftpDevRoot/*.cfg`
-  fcnt=`echo $flist | wc -w`
-  if [ $fcnt -gt 1 ]; then
-    ff=$(echo $flist | tr ' ' '\n' | head -1)
-    lf=$(echo $flist | tr ' ' '\n' | tail -1)
-    `diff $diffOpt --ignore-matching-lines='^;' $ff $lf > ${tftpDevRoot}/$devIP.diff`
+  if [ $fcnt -ge 1 ]; then
+    `diff $diffOpt --ignore-matching-lines='^!' ${tftpDevRoot}/${ff} ${tftpDevRoot}/${fn} > ${tftpDevRoot}/${devID}.diff`
   fi
 
 else
-  echo "$thisFN: Fail to save [$fn] from [$devIP] with status ($ccCopyState) !!!" >> $logFile
+  echo "$thisFN: Fail to save [$fn] from [$devIP] with status ($ActionStatus) !!!" >> $logFile
   echo "" >> $logFile
   exit 1
 fi
