@@ -15,6 +15,7 @@
 # dirStartup="****"
 # logFile="****"
 # diffOpt="-iubEB"
+# maxSTU=n
 cfgMode="RUN"
 
 Y=`date +%Y`
@@ -43,7 +44,6 @@ ActionStatus=5
   StatusUnderAction=3
 
 # Get Parameters
-
 if [ $# -lt 1 ]; then
   echo "$thisFN: No options found! [$@]"
   exit 1
@@ -79,22 +79,45 @@ IFS=$saveIFS
 
 case $cfgMode in
   RUN)
-    tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devID}/${Y}-${M}" ;;
+    tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devID}/${Y}-${M}"
+    pfn=$(printf "%s-%s%s%s" $devID $Y $M $D) ;;
   STU)
-    tftpDevRoot="${tftpRoot}/${dirStartup}" ;;
+    tftpDevRoot="${tftpRoot}/${dirStartup}/${devID}" 
+    pfn=$(printf "%s" $devID) ;;
     *)
     echo "$thisFN: Wrong mode [$cfgMode] !!!" >> $logFile
     exit 1 ;;
 esac
 
+gfn="${devID//./\\.}.*_[0-9]*\.cfg" 
+
 # Generate file name
-n=1
-fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
+n=$(ls -1 --reverse $tftpDevRoot | grep $gfn | head -1 | cut -f2 -d_ | cut -f1 -d.)
+if [[ $n =~ ^[0-9]+$ ]]; then
+  n=${n##0}
+else
+  n=1
+fi
+j=1
+fn=$(printf "${pfn}_%02d.cfg" $n)
 while [ -f ${tftpDevRoot}/${fn} ]; do
   echo "Check File: $fn"
-  n=$(($n+1));
-  fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
+  let n+=1
+  let j+=1
+  if [ $j -gt 199 ]; then
+    echo "$thisFN: Error with filename generation !!!" >> $logFile
+    echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
+    echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
+    echo "" >> $logFile
+    exit 1
+  fi
+  if [ $n -gt 99 ]; then
+    n=1
+    ls --sort=time --reverse $tftpDevRoot | grep $gfn | head -1 | xargs -I {} -t rm -f $tftpDevRoot/{}
+  fi
+  fn=$(printf "${pfn}_%02d.cfg" $n)
 done
+
 
 # TFTP
 sysObjectID=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP SNMPv2-MIB::sysObjectID.0)
@@ -118,7 +141,7 @@ ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpAc
 while [ $ActionStatus = "under-action" -o $ActionStatus = $StatusUnderAction ]; do
   sleep 1s
   ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
-  i=$(($i+1));
+  let i+=1
   if [ $i -gt 10 ]; then
     echo " Too long process! Exit."
     exit 1;
@@ -135,7 +158,7 @@ ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpAc
 while [ $ActionStatus = "under-action" -o $ActionStatus = $StatusUnderAction ]; do
   sleep 1s
   ActionStatus=$(snmpget -Oqv -v 2c -m ALL -c $snmpCommunity $devIP $sysMgmtTftpActionStatus)
-  i=$(($i+1));
+  let i+=1
   if [ $i -gt $tftpWait ]; then
     echo " Too long process! Exit." >> $logFile
     echo "" >> $logFile
@@ -146,20 +169,25 @@ done
 # Store file
 if [ $ActionStatus = success -o $ActionStatus = $StatusSuccess ]; then
   if [ -d $tftpDevRoot ]; then
-    flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep \.cfg)
-    fcnt=$(echo $flist | wc -w)
+    flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep $gfn)
+    fcnt=$(echo "$flist" | wc -l)
     if [ $fcnt -ge 1 ]; then
-      ff=$(echo $flist | tr ' ' '\n' | head -1)
-      lf=$(echo $flist | tr ' ' '\n' | tail -1)
+      if [ $cfgMode = STU -a $fcnt -ge $maxSTU ]; then
+        let fs=fcnt-maxSTU
+        ls --sort=time --reverse $tftpDevRoot | grep $gfn | head -$fs | xargs -I {} -t rm -f $tftpDevRoot/{}
+        flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep $gfn)
+      fi
+      of=$(echo "$flist" | head -1)
+      nf=$(echo "$flist" | tail -1)
     else
-      ff=0
-      lf=0
+      of=0
+      nf=0
     fi
   else
     fcnt=0
   fi
-  if [ -f ${tftpDevRoot}/${lf} ]; then
-    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^;' ${tftpRoot}/${fn} ${tftpDevRoot}/${lf}`
+  if [ -f ${tftpDevRoot}/${of} ]; then
+    diffRes=`diff $diffOpt -qs --ignore-matching-lines='^;' ${tftpRoot}/${fn} ${tftpDevRoot}/${nf}`
     if [[ $diffRes == *identical ]]; then
       echo "$thisFN: New file same as previous." >> $logFile
       echo "" >> $logFile
@@ -177,7 +205,7 @@ if [ $ActionStatus = success -o $ActionStatus = $StatusSuccess ]; then
   echo "" >> $logFile
   
   if [ $fcnt -ge 1 ]; then
-    `diff $diffOpt --ignore-matching-lines='^;' ${tftpDevRoot}/${ff} ${tftpDevRoot}/${fn} > ${tftpDevRoot}/${devID}.diff`
+    `diff $diffOpt --ignore-matching-lines='^;' ${tftpDevRoot}/${of} ${tftpDevRoot}/${fn} > ${tftpDevRoot}/${devID}.diff`
   fi
 
 else

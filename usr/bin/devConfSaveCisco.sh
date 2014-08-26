@@ -69,13 +69,33 @@ IFS=$saveIFS
 
 tftpDevRoot="${tftpRoot}/${dirRunning}/${Y}/${devID}/${Y}-${M}"
 
+gfn="${devID//./\\.}.*_[0-9]*\.cfg"
+pfn=$(printf "%s-%s%s%s" $devID $Y $M $D)
+
 # Generate file name
-n=1
-fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
+n=$(ls -1 --reverse $tftpDevRoot | grep $gfn | head -1 | cut -f2 -d_ | cut -f1 -d.)
+if [[ $n =~ ^[0-9]+$ ]]; then
+  n=${n##0}
+else
+  n=1
+fi
+j=1
+fn=$(printf "${pfn}_%02d.cfg" $n)
 while [ -f ${tftpDevRoot}/${fn} ]; do
-  echo "Check File: $fn"
-  n=$(($n+1));
-  fn=$(printf "%s-%s%s%s_%02d.cfg" $devID $Y $M $D $n)
+  let n+=1
+  let j+=1
+  if [ $j -gt 199 ]; then
+    echo "$thisFN: Error with filename generation !!!" >> $logFile
+    echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
+    echo "$thisFN: Location: ${tftpDevRoot}" >> $logFile
+    echo "" >> $logFile
+    exit 1
+  fi
+  if [ $n -gt 99 ]; then
+    n=1
+    ls --sort=time --reverse $tftpDevRoot | grep $gfn | head -1 | xargs -I {} -t rm -f $tftpDevRoot/{}
+  fi
+  fn=$(printf "${pfn}_%02d.cfg" $n)
 done
 
 echo "$thisFN: CONFIG IP: $devIP, NAME: $devNAME, FileName: $fn, TEXT: $devLog" >> $logFile
@@ -106,11 +126,11 @@ snmpset -v 2c -O qv -t 5 -c $snmpCommunity $devIP CISCO-CONFIG-COPY-MIB::ccCopyE
 # Store file
 if [ $ccCopyState = "successful" ]; then
   if [ -d $tftpDevRoot ]; then
-    flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep \.cfg)
-    fcnt=$(echo $flist | wc -w)
+    flist=$(ls -1 --sort=time --reverse $tftpDevRoot | grep $gfn)
+    fcnt=$(echo "$flist" | wc -l)
     if [ $fcnt -ge 1 ]; then
-      ff=$(echo $flist | tr ' ' '\n' | head -1)
-      lf=$(echo $flist | tr ' ' '\n' | tail -1)
+      ff=$(echo "$flist" | head -1)
+      lf=$(echo "$flist" | tail -1)
     else
       ff=0
       lf=0
