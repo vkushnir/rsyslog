@@ -73,9 +73,13 @@ gfn="${devID//./\\.}.*_[0-9]*\.cfg"
 pfn=$(printf "%s-%s%s%s" $devID $Y $M $D)
 
 # Generate file name
-n=$(ls -1 --reverse $tftpDevRoot | grep $gfn | head -1 | cut -f2 -d_ | cut -f1 -d.)
-if [[ $n =~ ^[0-9]+$ ]]; then
-  n=${n##0}
+if [ -d $tftpDevRoot ]; then
+  n=$(ls -1 --reverse $tftpDevRoot | grep $gfn | head -1 | cut -f2 -d_ | cut -f1 -d.)
+  if [[ $n =~ ^[0-9]+$ ]]; then
+    n=${n##0}
+  else
+    n=1
+  fi
 else
   n=1
 fi
